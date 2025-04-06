@@ -46,3 +46,5 @@ app.*.map.json
 backend/.env
 backend/node_modules
 my-question-app/node_modules
+backend\fastapi-backend\.env
+**/.env
