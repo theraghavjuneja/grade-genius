@@ -166,26 +166,15 @@ async def generate_questions(request: QuestionGenerationRequest):
     #     "chapter_background": request.chapter_background
     # }
     # this text along with input stuff will be passed to the llm
-
-
-
-
-
 ### MAIL SENDING SERVICE
-
-
 @router.post("/send-mail")
 def send_mail(req: EmailRequest):
-    try:
-        
+    try: 
         msg = EmailMessage()
         msg['Subject'] = req.subject
         msg['From'] = EMAIL_USER
         msg['To'] = req.to
         msg.set_content(req.body)
-
-        
-
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(EMAIL_USER, EMAIL_PASS)
             smtp.send_message(msg)
