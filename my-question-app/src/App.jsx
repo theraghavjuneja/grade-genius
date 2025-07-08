@@ -1,18 +1,68 @@
-
 import React, { useEffect, useState } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, getDoc } from 'firebase/firestore';
+
+// 🔥 Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyBM7yx0y4YVtgDys3bDyuS3wwmcr8dpXlw",
+  authDomain: "gradegeniuss.firebaseapp.com",
+  projectId: "gradegeniuss",
+  storageBucket: "gradegeniuss.firebasestorage.app",
+  messagingSenderId: "965258626860",
+  appId: "1:965258626860:web:22e3007f6495b2c21d0e89",
+  measurementId: "G-9FRXN4Q8QP"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const QuizApp = () => {
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(null); // null: loading, true: access, false: denied
 
+  const query = new URLSearchParams(window.location.search);
+  const userId = query.get('userId');
+  const classid = query.get('classid');
+  const studentId = query.get('studentId');
+
+  
   useEffect(() => {
+    const checkAuthorization = async () => {
+      if (!userId || !classid || !studentId) {
+        setIsAuthorized(false);
+        return;
+      }
+
+      try {
+        const studentRef = doc(db, `users/${userId}/classes/${classid}/students/${studentId}`);
+        const studentSnap = await getDoc(studentRef);
+
+        if (studentSnap.exists()) {
+          setIsAuthorized(true);
+        } else {
+          setIsAuthorized(false);
+        }
+      } catch (err) {
+        console.error('Firebase auth error:', err);
+        setIsAuthorized(false);
+      }
+    };
+
+    checkAuthorization();
+  }, [userId, classid, studentId]);
+
+  
+  useEffect(() => {
+    if (isAuthorized !== true) return;
     fetch('http://localhost:8000/questions')
       .then(response => response.json())
       .then(data => setQuestions(data.questions))
       .catch(error => console.error('Error fetching questions:', error));
-  }, []);
+  }, [isAuthorized]);
 
   const handleOptionSelect = (questionId, value) => {
     setSelectedOptions(prev => ({
@@ -33,46 +83,93 @@ const QuizApp = () => {
     }
   };
 
+  // const handleSubmit = async () => {
+  //   const formattedAnswers = {};
+  //   questions.forEach(q => {
+  //     const answer = selectedOptions[q.id];
+  //     if (q.type === 'multiple_choice' && typeof answer === 'number') {
+  //       formattedAnswers[q.id] = q.options[answer];
+  //     } else if (typeof answer === 'string') {
+  //       formattedAnswers[q.id] = answer;
+  //     }
+  //   });
+
+  //   try {
+  //     const res = await fetch('http://localhost:8000/submit', {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify({ answers: formattedAnswers })
+  //     });
+  //     const data = await res.json();
+  //     console.log('Submission successful:', data);
+  //     setSubmitted(true);
+  //   } catch (error) {
+  //     console.error('Submission failed:', error);
+  //   }
+  // };
   const handleSubmit = async () => {
     const formattedAnswers = {};
-
+    let score = 0;
+  
     questions.forEach(q => {
-      const answer = selectedOptions[q.id];
-      if (q.type === 'multiple_choice' && typeof answer === 'number') {
-        formattedAnswers[q.id] = q.options[answer]; // map index to string
-      } else if (typeof answer === 'string') {
-        formattedAnswers[q.id] = answer;
+      const userAnswer = selectedOptions[q.id];
+  
+      if (q.type === 'multiple_choice' && typeof userAnswer === 'number') {
+        const selectedOption = q.options[userAnswer];
+        formattedAnswers[q.id] = selectedOption;
+        if (selectedOption.trim().toLowerCase() === q.answer.trim().toLowerCase()) {
+          score++;
+        }
+      } else if (typeof userAnswer === 'string') {
+        formattedAnswers[q.id] = userAnswer;
+        if (userAnswer.trim().toLowerCase() === q.answer.trim().toLowerCase()) {
+          score++;
+        }
       }
     });
-
+  
     try {
-      const res = await fetch('http://localhost:8000/submit', {
+      const res = await fetch('https://8310-2409-4050-eb8-74bd-208c-c94b-9c9-3354.ngrok-free.app/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answers: formattedAnswers })
       });
-
+  
       const data = await res.json();
       console.log('Submission successful:', data);
+  
+      // Now send score to /api/submit-scores
+      await fetch('https://8310-2409-4050-eb8-74bd-208c-c94b-9c9-3354.ngrok-free.app/api/submit-scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId, score })
+      });
+  
       setSubmitted(true);
     } catch (error) {
       console.error('Submission failed:', error);
     }
   };
+  
 
   const currentQuestion = questions[currentQuestionIndex];
   const selectedValue = selectedOptions[currentQuestion?.id];
 
+  if (isAuthorized === null) {
+    return <div className="text-center mt-10 text-xl font-medium">⏳ Verifying access...</div>;
+  }
+
+  if (isAuthorized === false) {
+    return <div className="text-center mt-10 text-xl font-medium text-red-600">🚫 Unauthorized or Invalid Link</div>;
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-white">
-      {/* Header */}
       <div className="h-16 flex items-center px-6 shadow-md">
-        <h1 className="text-2xl font-bold">DevGenius</h1>
+        <h1 className="text-2xl font-bold">GradeGenius</h1>
       </div>
 
-      {/* Main Content */}
       <div className="flex flex-grow">
-        {/* Left - Question */}
         <div className="w-1/2 p-8 flex items-center justify-center">
           <div className="max-w-lg">
             {currentQuestion ? (
@@ -83,12 +180,11 @@ const QuizApp = () => {
           </div>
         </div>
 
-        {/* Right - Answer UI */}
         <div className="w-1/2 p-8 flex items-center justify-center">
           <div className="w-full max-w-md space-y-4">
             {currentQuestion?.type === 'multiple_choice' ? (
               currentQuestion.options.map((option, index) => (
-                <div 
+                <div
                   key={index}
                   className={`p-4 rounded-lg shadow cursor-pointer transition-all ${
                     selectedValue === index ? 'border-2 border-blue-500 bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'
@@ -111,9 +207,8 @@ const QuizApp = () => {
         </div>
       </div>
 
-      {/* Footer */}
       <div className="h-16 flex items-center justify-between px-6">
-        <button 
+        <button
           onClick={handlePrev}
           disabled={currentQuestionIndex === 0}
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
@@ -122,14 +217,14 @@ const QuizApp = () => {
         </button>
 
         {currentQuestionIndex === questions.length - 1 ? (
-          <button 
+          <button
             onClick={handleSubmit}
             className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700"
           >
             Submit
           </button>
         ) : (
-          <button 
+          <button
             onClick={handleNext}
             className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
@@ -138,7 +233,6 @@ const QuizApp = () => {
         )}
       </div>
 
-      {/* After Submit */}
       {submitted && (
         <div className="p-4 text-center text-green-700 font-semibold">
           🎉 Quiz submitted successfully!

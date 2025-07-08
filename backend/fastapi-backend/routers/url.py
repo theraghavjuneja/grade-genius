@@ -3,12 +3,14 @@ from fastapi import (
     status,
     HTTPException,
     File,
-    UploadFile
+    UploadFile,Request
 )
 from fastapi.responses import (
-    RedirectResponse
+    RedirectResponse,JSONResponse
 )
 import smtplib
+from datetime import datetime
+from pydantic import BaseModel
 from email.message import EmailMessage
 
 import json
@@ -107,16 +109,36 @@ async def upload_image(file: UploadFile = File(...)):
             detail=f"Unexpected error: {str(e)}"
         )
 
+# @router.post("/api/upload-pdf")
+# async def upload_pdf(pdf_file:UploadFile=File(...)):
+#     file_id = str(uuid.uuid4())
+#     file_path = os.path.join(PDF_STORAGE_DIR, f"{file_id}.pdf")
+
+
+#     with open(file_path, "wb") as f:
+#         f.write(await pdf_file.read())
+
+#     return {"file_id": file_id, "message": "PDF uploaded successfully"}
 @router.post("/api/upload-pdf")
-async def upload_pdf(pdf_file:UploadFile=File(...)):
+async def upload_pdf(request: Request):
+    form = await request.form()
+
+    # Try both possible field names
+    pdf_file: UploadFile | None = form.get("pdf_file") or form.get("file")
+    
+    if not pdf_file:
+        return JSONResponse(
+            status_code=422,
+            content={"message": "No PDF file found in request under 'pdf_file' or 'file'"},
+        )
+
     file_id = str(uuid.uuid4())
     file_path = os.path.join(PDF_STORAGE_DIR, f"{file_id}.pdf")
-
 
     with open(file_path, "wb") as f:
         f.write(await pdf_file.read())
 
-    return {"file_id": file_id, "message": "PDF uploaded successfully"}
+    return {"file_id": file_id, "message": "uploaded successfully"}
 @router.post("/api/generate-questions")
 async def generate_questions(request: QuestionGenerationRequest):
     file_path = os.path.join(PDF_STORAGE_DIR, f"{request.file_id}.pdf")
@@ -141,14 +163,15 @@ async def generate_questions(request: QuestionGenerationRequest):
     )
     try:
         raw = output.content
+        logger.info(raw)
 
-        # Step 1: Convert escaped characters into proper string (e.g., "\n" to actual newline)
+       
         raw = raw.encode('utf-8').decode('unicode_escape')
 
-        # Step 2: Remove markdown syntax like ```json ... ```
+        
         cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
 
-        # Step 3: Now it's safe to parse as JSON
+        
         parsed = json.loads(cleaned)
         async with aiofiles.open(DATA_FILE, "w") as f:
             await f.write(json.dumps(parsed))
@@ -167,19 +190,61 @@ async def generate_questions(request: QuestionGenerationRequest):
     # }
     # this text along with input stuff will be passed to the llm
 ### MAIL SENDING SERVICE
+# @router.post("/send-mail")
+# def send_mail(req: EmailRequest):
+#     try: 
+#         msg = EmailMessage()
+#         msg['Subject'] = req.subject
+#         msg['From'] = EMAIL_USER
+#         msg['To'] = req.to
+#         msg.set_content(req.body)
+#         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+#             smtp.login(EMAIL_USER, EMAIL_PASS)
+#             smtp.send_message(msg)
+
+#         return {"status": "sent"}
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 @router.post("/send-mail")
 def send_mail(req: EmailRequest):
-    try: 
-        msg = EmailMessage()
-        msg['Subject'] = req.subject
-        msg['From'] = EMAIL_USER
-        msg['To'] = req.to
-        msg.set_content(req.body)
+    if len(req.to) != len(req.student_id):
+        raise HTTPException(status_code=400, detail="Emails and student IDs must match in length.")
+    
+    try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(EMAIL_USER, EMAIL_PASS)
-            smtp.send_message(msg)
 
-        return {"status": "sent"}
+            for email, student_id in zip(req.to, req.student_id):
+                
+                test_link = f"http://localhost:5173?userId={req.user_id}&&classid={req.class_id}&&studentId={student_id}"
+                
+                
+                subject = "📝 Your GradeGenius Test Link"
+                body = f"""
+Hi there,
+
+You've been invited to take your quiz on GradeGenius. Please use the following secure link to access your test:
+
+👉 {test_link}
+
+This link is unique to you. Make sure you don't share it with anyone else.
+
+Best of luck!
+GradeGenius Team
+                """.strip()
+
+                
+                msg = EmailMessage()
+                msg['Subject'] = subject
+                msg['From'] = EMAIL_USER
+                msg['To'] = email
+                msg.set_content(body)
+
+                
+                smtp.send_message(msg)
+
+        return {"status": "All emails sent successfully"}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
